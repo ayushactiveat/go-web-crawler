@@ -1,44 +1,45 @@
-package main // executable program, not any library
+package main
 
-import "fmt" // print to console like iostream
-import "io" // to read response body
-import "net/http" // to make HTTP requests
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"regexp"
+)
 
 func main() {
+	fmt.Println("=== Go Web Crawler (Day 3) ===")
 
-        targetURL := "https://example.com" // target URL we want to crawl
+	targetURL := "https://example.com"
+	fmt.Println("Fetching:", targetURL)
 
-        // makeing HTTP get request
-        fmt.Println("Fetching:", targetURL)
-        resp, err := http.Get(targetURL)
+	resp, err := http.Get(targetURL)
+	if err != nil {
+		fmt.Println("Error fetching URL:", err)
+		return
+	}
+	defer resp.Body.Close()
 
-        // Handle any network erros( eg no internet, bad URL)
-        if err != nil {
-                fmt.Println("Error fetching URL:", err)
-                return
-        }
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error reading body:", err)
+		return
+	}
 
-        // defer closing body until func ends to prevent memory loss
-        defer resp.Body.Close()
+	htmlString := string(body)
 
-        fmt.Println("Status Code:", resp.StatusCode)
+	// 1. Compile the Regex to find href="..."
+	// This pattern looks for href=", followed by any characters that aren't a quote, followed by a quote.
+	re := regexp.MustCompile(`href="([^"]+)"`)
 
-        // read entire html body into a byte slice
-        body, err := io.ReadAll(resp.Body)
-        if err != nil {
-                fmt.Println("Error reading body:", err)
-                return
-        }
+	// 2. Find all matches
+	matches := re.FindAllStringSubmatch(htmlString, -1)
 
-        // convert byte slice to a string, print first 300 char
-        htmlString := string(body)
+	fmt.Printf("\nFound %d links:\n", len(matches))
 
-        //safety check, to check if pageis longer than 300 chars
-        if len(htmlString) > 300 {
-                fmt.Println("\nFirst 300 chars of HTML:")
-                fmt.Println(htmlString[:300])
-        } else {
-                fmt.Println("\nHTML:")
-                fmt.Println(htmlString)
-        }
+	// 3. Loop through the matches and print them
+	// matches[i][1] contains the actual URL (the capture group)
+	for i, match := range matches {
+		fmt.Printf("%d: %s\n", i+1, match[1])
+	}
 }
