@@ -34,17 +34,25 @@ func crawl(url string, wg *sync.WaitGroup) {
 }
 
 func main() {
-	fmt.Println("=== Go Web Crawler (Day 4 - Concurrency) ===")
+	fmt.Println("=== Go Web Crawler (Day 5 - Bloom Filter) ===")
 
 	urls := []string{
 		"https://example.com",
 		"https://go.dev",
 		"https://www.google.com",
+		"https://example.com", 
 	}
 
+	bf := NewBloomFilter(1000)
 	var wg sync.WaitGroup
 
 	for _, url := range urls {
+		if bf.Exists(url) {
+			fmt.Printf("Skipping (already visited): %s\n", url)
+			continue
+		}
+		
+		bf.Add(url)
 		wg.Add(1)
 		go crawl(url, &wg)
 	}
