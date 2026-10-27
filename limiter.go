@@ -1,8 +1,6 @@
 package main
 
-import (
-	"time"
-)
+import "time"
 
 type TokenBucket struct {
 	tokens chan struct{}
@@ -10,15 +8,10 @@ type TokenBucket struct {
 }
 
 func NewTokenBucket(capacity int, refillRate time.Duration) *TokenBucket {
-	tb := &TokenBucket{
-		tokens: make(chan struct{}, capacity),
-		stop:   make(chan struct{}),
-	}
-
+	tb := &TokenBucket{tokens: make(chan struct{}, capacity), stop: make(chan struct{})}
 	for i := 0; i < capacity; i++ {
 		tb.tokens <- struct{}{}
 	}
-
 	go func() {
 		ticker := time.NewTicker(refillRate)
 		defer ticker.Stop()
@@ -34,14 +27,8 @@ func NewTokenBucket(capacity int, refillRate time.Duration) *TokenBucket {
 			}
 		}
 	}()
-
 	return tb
 }
 
-func (tb *TokenBucket) Wait() {
-	<-tb.tokens
-}
-
-func (tb *TokenBucket) Stop() {
-	close(tb.stop)
-}
+func (tb *TokenBucket) Wait() { <-tb.tokens }
+func (tb *TokenBucket) Stop() { close(tb.stop) }

@@ -1,8 +1,6 @@
 package main
 
-import (
-	"hash/fnv"
-)
+import "hash/fnv"
 
 type BloomFilter struct {
 	bitset []bool
@@ -10,10 +8,7 @@ type BloomFilter struct {
 }
 
 func NewBloomFilter(size uint) *BloomFilter {
-	return &BloomFilter{
-		bitset: make([]bool, size),
-		size:   size,
-	}
+	return &BloomFilter{bitset: make([]bool, size), size: size}
 }
 
 func (bf *BloomFilter) hashes(s string) []uint {
@@ -24,7 +19,6 @@ func (bf *BloomFilter) hashes(s string) []uint {
 	h2 := fnv.New32()
 	h2.Write([]byte(s))
 	hash2 := h2.Sum32() % uint32(bf.size)
-
 	return []uint{uint(hash1), uint(hash2)}
 }
 

@@ -28,13 +28,20 @@ func crawl(url string, wg *sync.WaitGroup, limiter *TokenBucket) {
 }
 
 func main() {
-	fmt.Println("=== Go Web Crawler (Day 6 - Rate Limiter) ===")
+	fmt.Println("=== Go Web Crawler (RabbitMQ Distributed) ===")
 	
+	qm, err := NewQueueManager("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		fmt.Println("Warning: RabbitMQ not running. Falling back to local mode.")
+	} else {
+		defer qm.Close()
+		fmt.Println("Connected to RabbitMQ.")
+	}
+
 	urls := []string{
 		"https://example.com",
 		"https://go.dev",
 		"https://www.google.com",
-		"https://github.com",
 	}
 
 	bf := NewBloomFilter(1000)
@@ -43,13 +50,27 @@ func main() {
 	
 	var wg sync.WaitGroup
 
+	if qm != nil {
+		msgs, _ := qm.Consume()
+		go func() {
+			for d := range msgs {
+				wg.Add(1)
+				go crawl(string(d.Body), &wg, limiter)
+			}
+		}()
+	}
+
 	for _, url := range urls {
 		if bf.Exists(url) {
 			continue
 		}
 		bf.Add(url)
-		wg.Add(1)
-		go crawl(url, &wg, limiter)
+		if qm != nil {
+			qm.Publish(url)
+		} else {
+			wg.Add(1)
+			go crawl(url, &wg, limiter)
+		}
 	}
 
 	wg.Wait()
