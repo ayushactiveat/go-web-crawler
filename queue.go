@@ -2,47 +2,96 @@ package main
 
 import (
 	"context"
-	"time"
-
-	amqp "github.com/rabbitmq/amqp091-go"
+	"sync"
 )
 
-type QueueManager struct {
-	conn *amqp.Connection
-	ch   *amqp.Channel
-	q    amqp.Queue
+// Task is one URL to crawl. Depth is the number of hops from the seed and
+// Origin is the seed's host, used to stay on one site when asked to.
+type Task struct {
+	URL    string `json:"url"`
+	Depth  int    `json:"depth"`
+	Origin string `json:"origin"`
 }
 
-func NewQueueManager(url string) (*QueueManager, error) {
-	conn, err := amqp.Dial(url)
-	if err != nil {
-		return nil, err
+// Message is a Task handed to a worker. Ack should be called once the worker
+// is finished with it, otherwise a broker-backed queue will redeliver it.
+type Message struct {
+	Task
+	Ack func()
+}
+
+type Queue interface {
+	Publish(ctx context.Context, t Task) error
+	Consume(ctx context.Context) (<-chan Message, error)
+	Close() error
+}
+
+// MemQueue is an unbounded in-process FIFO, used when RabbitMQ isn't around.
+// It has to be unbounded: workers publish new links while they consume, so a
+// fixed-size channel can deadlock once every worker is blocked on a full one.
+type MemQueue struct {
+	mu    sync.Mutex
+	items []Task
+	sig   chan struct{}
+	done  chan struct{}
+	once  sync.Once
+}
+
+func NewMemQueue() *MemQueue {
+	return &MemQueue{sig: make(chan struct{}, 1), done: make(chan struct{})}
+}
+
+func (q *MemQueue) Publish(_ context.Context, t Task) error {
+	q.mu.Lock()
+	q.items = append(q.items, t)
+	q.mu.Unlock()
+	select {
+	case q.sig <- struct{}{}:
+	default:
 	}
-	ch, err := conn.Channel()
-	if err != nil {
-		return nil, err
+	return nil
+}
+
+func (q *MemQueue) pop() (Task, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 {
+		return Task{}, false
 	}
-	q, err := ch.QueueDeclare("url_queue", false, false, false, false, nil)
-	if err != nil {
-		return nil, err
-	}
-	return &QueueManager{conn: conn, ch: ch, q: q}, nil
+	t := q.items[0]
+	q.items = q.items[1:]
+	return t, true
 }
 
-func (qm *QueueManager) Publish(url string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return qm.ch.PublishWithContext(ctx, "", qm.q.Name, false, false, amqp.Publishing{
-		ContentType: "text/plain",
-		Body:        []byte(url),
-	})
+func (q *MemQueue) Consume(ctx context.Context) (<-chan Message, error) {
+	out := make(chan Message)
+	go func() {
+		defer close(out)
+		for {
+			t, ok := q.pop()
+			if !ok {
+				select {
+				case <-q.sig:
+					continue
+				case <-ctx.Done():
+					return
+				case <-q.done:
+					return
+				}
+			}
+			select {
+			case out <- Message{Task: t, Ack: func() {}}:
+			case <-ctx.Done():
+				return
+			case <-q.done:
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
-func (qm *QueueManager) Consume() (<-chan amqp.Delivery, error) {
-	return qm.ch.Consume(qm.q.Name, "", true, false, false, false, nil)
-}
-
-func (qm *QueueManager) Close() {
-	qm.ch.Close()
-	qm.conn.Close()
+func (q *MemQueue) Close() error {
+	q.once.Do(func() { close(q.done) })
+	return nil
 }
